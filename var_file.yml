@@ -1,0 +1,62 @@
+---
+# vars file for create-ec2
+aws_a_key:  
+aws_s_key:  
+
+region1: 
+
+az1: 
+az2: 
+
+# create vpc 
+vpc_name:  
+vpc_cidr: 0.0.0.0/0 
+
+# create subnet
+pub_subnet_cidr: 0.0.0.0/0 
+pub_subnet_name:
+
+pri_subnet_cidr_1: 
+pri_subnet_name1: 
+
+pri_subnet_cidr_2: 
+pri_subnet_name2: 
+
+# create route
+private_route_name: 
+public_route_name: 
+
+# create gateway
+igw_name: 
+
+# create security group
+wep_sg_name: 
+db_sg_name: 
+
+# create key - must change key file path and ansible.cfg file <136>
+key_name: ec2key 
+
+# create ec2
+ec2_name: 
+instance_type:
+instance_ami: 
+
+# add seoul route table
+seoul_vpc_id:
+seoul_region: 
+seoul_cidr: 
+seoul_route_id: 
+seoul_subnet_id:  
+seoul_igw_id: 
+
+peering_name: 
+
+# create RDS 
+db_subnet_group_name: 
+db_name: 
+db_instance_name: 
+db_instance_type: db.t2.micro
+
+master_name: 
+master_pw:  
+
