@@ -1,0 +1,324 @@
+---
+# tasks file for instance-create
+- name: install packages
+  yum:
+    name:
+     - python-pip
+     - python3-pip
+    state: latest
+    update_cache: no
+
+- name: ensure python pip packages are installed
+  pip:
+    name:
+     - boto
+     - boto3
+
+- name: Create VPC
+  ec2_vpc_net:
+    name: "{{ vpc_name }}" 
+    region: "{{ region1 }}"
+    cidr_block: "{{ vpc_cidr }}"
+    tenancy: default
+    dns_hostnames: yes
+    aws_access_key: "{{ aws_a_key }}"
+    aws_secret_key: "{{ aws_s_key }}"
+    state: present
+  register: vpc_result
+
+
+- name: Create Public Subnet
+  ec2_vpc_subnet:
+    vpc_id: "{{ vpc_result.vpc.id }}"
+    region: "{{ region1 }}"
+    az: "{{ az1 }}"
+    cidr: "{{ pub_subnet_cidr }}"
+    map_public: yes
+    aws_access_key: "{{ aws_a_key }}"
+    aws_secret_key: "{{ aws_s_key }}"
+    state: present
+    resource_tags:
+      Name: "{{ pub_subnet_name }}"
+  register: public_subnet_result
+
+- name: Create Private1 Subnet
+  ec2_vpc_subnet:
+    vpc_id: "{{ vpc_result.vpc.id }}"
+    region: "{{ region1 }}"
+    az: "{{ az1 }}"
+    cidr: "{{ pri_subnet_cidr_1 }}"
+    map_public: no
+    aws_access_key: "{{ aws_a_key }}"
+    aws_secret_key: "{{ aws_s_key }}"
+    state: present
+    resource_tags:
+      Name: "{{ pri_subnet_name1 }}" 
+  register: private_subnet_1
+
+
+- name: Create Private2 Subnet
+  ec2_vpc_subnet:
+    vpc_id: "{{ vpc_result.vpc.id }}"
+    region: "{{ region1 }}"
+    az: "{{ az2 }}"
+    cidr: "{{ pri_subnet_cidr_2 }}"
+    map_public: no
+    aws_access_key: "{{ aws_a_key }}"
+    aws_secret_key: "{{ aws_s_key }}"
+    state: present
+    resource_tags:
+      Name: "{{ pri_subnet_name2 }}" 
+  register: private_subnet_2
+
+
+- name: Create Internet Gateway
+  ec2_vpc_igw:
+    vpc_id: "{{ vpc_result.vpc.id }}"
+    region: "{{ region1 }}"
+    aws_access_key: "{{ aws_a_key }}"
+    aws_secret_key: "{{ aws_s_key }}"
+    state: present
+    tags:
+      Name: "{{ igw_name }}" 
+  register: igw_result
+
+- name: Create Web Security Group
+  ec2_group:
+    name: "{{ wep_sg_name }}"
+    vpc_id: "{{ vpc_result.vpc.id }}"
+    region: "{{ region1 }}"
+    aws_access_key: "{{ aws_a_key }}"
+    aws_secret_key: "{{ aws_s_key }}"
+    state: present
+    description: public security group
+    tags:
+      Name: "{{ wep_sg_name }}"
+    rules:
+    - proto: tcp
+      ports:
+      - 22
+      cidr_ip: 0.0.0.0/0
+    - proto: tcp
+      ports:
+      - 80
+      cidr_ip: 0.0.0.0/0
+    - proto: tcp
+      ports:
+      - 443
+      cidr_ip: 0.0.0.0/0
+    - proto: icmp
+      from_port: -1
+      to_port: -1
+      cidr_ip: 0.0.0.0/0
+  register: web_security_group_result
+
+- name: Create MySQL Security Group
+  ec2_group:
+    name: "{{ db_sg_name }}"
+    vpc_id: "{{ vpc_result.vpc.id }}"
+    region: "{{ region1 }}"
+    aws_access_key: "{{ aws_a_key }}"
+    aws_secret_key: "{{ aws_s_key }}"
+    state: present
+    description: private security group
+    tags:
+      Name: "{{ db_sg_name }}"
+    rules:
+    - proto: all
+      group_name: "{{ wep_sg_name }}"
+  register: mysql_security_group_result
+
+- name: Set up private Route Table
+  ec2_vpc_route_table:
+    vpc_id: "{{ vpc_result.vpc.id }}"
+    region: "{{ region1 }}"
+    aws_access_key: "{{ aws_a_key }}"
+    aws_secret_key: "{{ aws_s_key }}"
+    state: present
+    tags:
+      Name: "{{ private_route_name }}"
+    subnets:
+      - "{{ private_subnet_1.subnet.id }}"
+      - "{{ private_subnet_2.subnet.id }}"
+
+
+- name: Create a DB subnet group
+  rds_subnet_group:
+    region: "{{ region1 }}"
+    state: present
+    aws_access_key: "{{ aws_a_key }}"
+    aws_secret_key: "{{ aws_s_key }}"
+    name: "{{ db_subnet_group_name }}"
+    description: DB subnet 1 and DB subnet 2 are the one group
+    subnets:
+    - "{{ private_subnet_1.subnet.id }}"
+    - "{{ private_subnet_2.subnet.id }}"
+
+
+- name: Create an EC2 key
+  ec2_key:
+    aws_access_key: "{{ aws_a_key }}"
+    aws_secret_key: "{{ aws_s_key }}"
+    name: "{{ key_name }}"
+    region: "{{ region1 }}"
+  register: ec2_key_result
+
+- name: Save private key
+ # copy: content="{{ ec2_key_result.key.private_key }}" dest=/root/.ssh/ohio.pem mode=0400
+  copy: content="{{ ec2_key_result.key.private_key }}" dest=/root/ec2key.pem mode=0400
+  when: ec2_key_result.changed
+
+- name: Create EC2
+  ec2:
+    key_name: "{{ key_name }}"
+    aws_access_key: "{{ aws_a_key }}"
+    aws_secret_key: "{{ aws_s_key }}"
+    region: "{{ region1 }}"
+    instance_type: "{{ instance_type }}"
+    image: "{{ instance_ami }}"
+    group: "{{ wep_sg_name }}"
+    wait: yes
+    count: 1
+    vpc_subnet_id: "{{ public_subnet_result.subnet.id }}"
+    assign_public_ip: yes
+  register: ec2_result
+
+
+- name: Request VPC Peering between Seoul and tokyo
+  ec2_vpc_peer:
+    aws_access_key: "{{ aws_a_key }}"
+    aws_secret_key: "{{ aws_s_key }}"
+    region: "{{ region1 }}"
+    vpc_id: "{{ vpc_result.vpc.id }}"
+    peer_vpc_id: "{{ seoul_vpc_id }}"
+    peer_region: "{{ seoul_region }}"
+    state: present
+    tags:
+      Name: "{{ peering_name }}"
+  register: vpc_peer_req
+
+- shell: "sleep 10"
+
+- name: Accept VPC Peering between Seoul and tokyo
+  ec2_vpc_peer:
+    aws_access_key: "{{ aws_a_key }}"
+    aws_secret_key: "{{ aws_s_key }}"
+    region: "{{ seoul_region }}"
+    vpc_id: "{{ vpc_result.vpc.id }}"
+    peering_id: "{{ vpc_peer_req.peering_id }}"
+    state: accept
+    tags:
+      Name: "{{ peering_name}}"
+  register: vpc_peer_acc
+
+- name: Set up tokyo Route Table
+  ec2_vpc_route_table:
+    aws_access_key: "{{ aws_a_key }}"
+    aws_secret_key: "{{ aws_s_key }}"
+    vpc_id: "{{ vpc_result.vpc.id }}"
+    region: "{{ region1 }}"
+    state: present
+    tags:
+      Name: "{{ public_route_name }}"
+    subnets: [ "{{ public_subnet_result.subnet.id }}" ]
+
+    # create routes
+    routes:
+      - dest: 0.0.0.0/0
+        gateway_id: "{{ igw_result.gateway_id }}"
+      - dest: "{{ seoul_cidr }}"
+        vpc_peering_connection_id: "{{ vpc_peer_req.peering_id }}"
+  register: public_route_result
+
+- name: Set up Seoul Route Table
+  ec2_vpc_route_table:
+    aws_access_key: "{{ aws_a_key }}"
+    aws_secret_key: "{{ aws_s_key }}"
+    vpc_id: "{{ seoul_vpc_id }}" 
+    region: "{{ seoul_region }}" 
+    route_table_id: "{{ seoul_route_id }}"
+    lookup: id
+    tags:
+      Name: Seoul Route table
+    subnets: "{{ seoul_subnet_id }}"
+
+    # create routes
+    routes:
+      - dest: 0.0.0.0/0
+        gateway_id: "{{ seoul_igw_id }}" 
+      - dest: "{{ vpc_cidr }}" 
+        vpc_peering_connection_id: "{{ vpc_peer_req.peering_id }}"
+  register: tokyo_route_result
+
+
+- ec2_instance_info:
+    filters:
+      instance-state-name: running
+    region: "{{ region1 }}"
+    aws_access_key: "{{ aws_a_key }}"
+    aws_secret_key: "{{ aws_s_key }}"
+  register: test
+
+  #- debug:
+  #    msg: "{{ item.public_ip_address }}"
+  #  loop: "{{ test.instances }}"
+- set_fact:
+    tokyoip: "{{ item.public_ip_address }}"
+  loop: "{{ test.instances }}"
+  #- hostname:
+  #    name: mooon
+  #  delegate_to: "{{ ipipip }}"
+  #  remote_user: ec2-user
+  #  become: true
+
+- name: launching RDS
+  rds:
+    command: create
+    db_engine: MySQL
+    size: 20
+    db_name: "{{ db_name }}"
+    instance_name: "{{ db_instance_name }}"
+    aws_access_key: "{{ aws_a_key }}"
+    aws_secret_key: "{{ aws_s_key }}"
+    instance_type: "{{ db_instance_type }}"
+    username: "{{ master_name }}"
+    password: "{{ master_pw }}"
+    publicly_accessible: yes
+    region: "{{ region1 }}"
+    vpc_security_groups: ["{{ mysql_security_group_result.group_id }}"]
+    subnet: "{{ db_subnet_group_name }}"
+    wait: yes
+    wait_timeout: 600
+  register: rds
+
+
+- name: Save rds endpoint
+  copy: content="{{ rds.instance.endpoint }}" dest=/root/endpoint mode=0600
+
+- block:
+  - hostname:
+      name: tokyo 
+  - yum:
+      name:
+        - httpd
+        - php
+        - mariadb
+        - mariadb-server
+        - MySQL-python
+        - python-pip
+        - git
+        - python3-pip
+      state: latest
+  - service:
+      name: "{{ item }}"
+      state: started
+    loop:
+      - httpd
+      - mariadb
+  - pip:
+      name:
+        - boto
+        - boto3
+  delegate_to: "{{ tokyoip }}"
+  remote_user: ec2-user
+  become: true
