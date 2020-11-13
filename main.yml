@@ -1,18 +1,5 @@
 ---
 # tasks file for instance-create
-- name: install packages
-  yum:
-    name:
-     - python-pip
-     - python3-pip
-    state: latest
-    update_cache: no
-
-- name: ensure python pip packages are installed
-  pip:
-    name:
-     - boto
-     - boto3
 
 - name: Create VPC
   ec2_vpc_net:
@@ -84,7 +71,7 @@
 
 - name: Create Web Security Group
   ec2_group:
-    name: "{{ wep_sg_name }}"
+    name: "{{ web_sg_name }}"
     vpc_id: "{{ vpc_result.vpc.id }}"
     region: "{{ region1 }}"
     aws_access_key: "{{ aws_a_key }}"
@@ -92,7 +79,7 @@
     state: present
     description: public security group
     tags:
-      Name: "{{ wep_sg_name }}"
+      Name: "{{ web_sg_name }}"
     rules:
     - proto: tcp
       ports:
@@ -125,7 +112,7 @@
       Name: "{{ db_sg_name }}"
     rules:
     - proto: all
-      group_name: "{{ wep_sg_name }}"
+      group_name: "{{ web_sg_name }}"
   register: mysql_security_group_result
 
 - name: Set up private Route Table
@@ -164,8 +151,8 @@
   register: ec2_key_result
 
 - name: Save private key
- # copy: content="{{ ec2_key_result.key.private_key }}" dest=/root/.ssh/ohio.pem mode=0400
-  copy: content="{{ ec2_key_result.key.private_key }}" dest=/root/ec2key.pem mode=0400
+  # copy: content="{{ ec2_key_result.key.private_key }}" dest=/root/.ssh/ohio.pem mode=0400
+  copy: content="{{ ec2_key_result.key.private_key }}" dest=/root/{{ key_name }}.pem mode=0400
   when: ec2_key_result.changed
 
 - name: Create EC2
@@ -176,13 +163,15 @@
     region: "{{ region1 }}"
     instance_type: "{{ instance_type }}"
     image: "{{ instance_ami }}"
-    group: "{{ wep_sg_name }}"
+    group: "{{ web_sg_name }}"
     wait: yes
-    count: 1
+    exact_count: 1
+    instance_tags:
+      name: "{{ instance_name }}"
+    count_tag: name
     vpc_subnet_id: "{{ public_subnet_result.subnet.id }}"
     assign_public_ip: yes
   register: ec2_result
-
 
 - name: Request VPC Peering between Seoul and tokyo
   ec2_vpc_peer:
@@ -263,7 +252,7 @@
   #    msg: "{{ item.public_ip_address }}"
   #  loop: "{{ test.instances }}"
 - set_fact:
-    tokyoip: "{{ item.public_ip_address }}"
+    ipipip: "{{ item.public_ip_address }}"
   loop: "{{ test.instances }}"
   #- hostname:
   #    name: mooon
@@ -288,12 +277,17 @@
     vpc_security_groups: ["{{ mysql_security_group_result.group_id }}"]
     subnet: "{{ db_subnet_group_name }}"
     wait: yes
-    wait_timeout: 600
+    wait_timeout: 700
   register: rds
 
 
 - name: Save rds endpoint
   copy: content="{{ rds.instance.endpoint }}" dest=/root/endpoint mode=0600
+
+- name: git code
+  git:
+    repo: "{{ repositorie_link }}" 
+    dest: /root/git/
 
 - block:
   - hostname:
@@ -319,6 +313,79 @@
       name:
         - boto
         - boto3
-  delegate_to: "{{ tokyoip }}"
+
+  - name: Create DB
+    community.mysql.mysql_db:
+      login_host: "{{ rds.instance.endpoint }}"
+      login_user: pjuser
+      login_password: 12345678
+      name: DB_mysql
+      state: present
+
+  - name: Create Table
+    community.mysql.mysql_query:
+      login_host: "{{ rds.instance.endpoint }}"
+      login_user: pjuser
+      login_password: 12345678
+      login_db: DB_mysql
+      query:
+        - CREATE TABLE employee_salary2 ( id int NOT NULL AUTO_INCREMENT, name varchar(30) NOT NULL, position varchar(20) NOT NULL, base_pay int NOT NULL, extra_pay int NOT NULL, tax_rate decimal(5,2) NOT NULL, salary int NOT NULL, PRIMARY KEY(id) )
+
+        - INSERT INTO employee_salary2 (name, position, base_pay, extra_pay, tax_rate, salary) VALUES ('Moon Hyo Jin', 'Ansible Leader', 3100000, 200000, 0.02,3234000)
+        - INSERT INTO employee_salary2 (name, position, base_pay, extra_pay, tax_rate, salary) VALUES ('Park Yu jin', 'Member', 3000000, 300000, 0.02, 3234000)
+      single_transaction: yes
+
+
+  - name: Copy File
+    copy:
+      src: "~/git/abc.tar.gz"
+      dest: "/"
+      mode: 0755
+
+  - name: Unarchive File
+    unarchive:
+      src: "/abc.tar.gz"
+      dest: "/var/www/html/"
+      remote_src: yes
+
+  - name: Change Endpoint1
+    replace:
+      path: /var/www/html/create_process.php
+      regexp: "localhost"
+      replace: "{{ rds.instance.endpoint }}"
+
+  - name: Change Endpoint2
+    replace:
+      path: /var/www/html/delete.php
+      regexp: "localhost"
+      replace: "{{ rds.instance.endpoint }}"
+
+  - name: Change Endpoint3
+    replace:
+      path: /var/www/html/print.php
+      regexp: "localhost"
+      replace: "{{ rds.instance.endpoint }}"
+
+  - name: Change Endpoint4
+    replace:
+      path: /var/www/html/search.php
+      regexp: "localhost"
+      replace: "{{ rds.instance.endpoint }}"
+
+  - name: Change Endpoint5
+    replace:
+      path: /var/www/html/update.php
+      regexp: "localhost"
+      replace: "{{ rds.instance.endpoint }}"
+
+
+  - name: Change Endpoint6
+    replace:
+      path: /var/www/html/update_process.php
+      regexp: "localhost"
+      replace: "{{ rds.instance.endpoint }}"
+
+
+  delegate_to: "{{ ipipip }}"
   remote_user: ec2-user
   become: true
