@@ -284,10 +284,6 @@
 - name: Save rds endpoint
   copy: content="{{ rds.instance.endpoint }}" dest=/root/endpoint mode=0600
 
-- name: git code
-  git:
-    repo: "{{ repositorie_link }}" 
-    dest: /root/git/
 
 - block:
   - hostname:
@@ -325,9 +321,9 @@
   - name: Create Table
     community.mysql.mysql_query:
       login_host: "{{ rds.instance.endpoint }}"
-      login_user: pjuser
-      login_password: 12345678
-      login_db: DB_mysql
+      login_user: "{{ master_name }}"
+      login_password: "{{ master_pw }}"
+      login_db: "{{ db_name }}"
       query:
         - CREATE TABLE employee_salary2 ( id int NOT NULL AUTO_INCREMENT, name varchar(30) NOT NULL, position varchar(20) NOT NULL, base_pay int NOT NULL, extra_pay int NOT NULL, tax_rate decimal(5,2) NOT NULL, salary int NOT NULL, PRIMARY KEY(id) )
 
@@ -335,6 +331,10 @@
         - INSERT INTO employee_salary2 (name, position, base_pay, extra_pay, tax_rate, salary) VALUES ('Park Yu jin', 'Member', 3000000, 300000, 0.02, 3234000)
       single_transaction: yes
 
+  - name: git code
+    git:
+      repo: "{{ repositorie_link }}" 
+      dest: /root/git/
 
   - name: Copy File
     copy:
